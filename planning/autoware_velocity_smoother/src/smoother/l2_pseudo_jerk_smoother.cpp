@@ -17,6 +17,7 @@
 #include "autoware/velocity_smoother/trajectory_utils.hpp"
 
 #include <Eigen/Core>
+#include <autoware/agnocast_wrapper/node.hpp>
 
 #include <algorithm>
 #include <chrono>
@@ -26,14 +27,36 @@
 
 namespace autoware::velocity_smoother
 {
+namespace
+{
+template <typename NodeT>
+void declareSmootherParam(L2PseudoJerkSmoother::Param & p, NodeT & node)
+{
+  p.pseudo_jerk_weight = node.template declare_parameter<double>("pseudo_jerk_weight");
+  p.over_v_weight = node.template declare_parameter<double>("over_v_weight");
+  p.over_a_weight = node.template declare_parameter<double>("over_a_weight");
+}
+}  // namespace
+
 L2PseudoJerkSmoother::L2PseudoJerkSmoother(
   rclcpp::Node & node, const std::shared_ptr<autoware_utils_debug::TimeKeeper> time_keeper)
 : SmootherBase(node, time_keeper)
 {
-  auto & p = smoother_param_;
-  p.pseudo_jerk_weight = node.declare_parameter<double>("pseudo_jerk_weight");
-  p.over_v_weight = node.declare_parameter<double>("over_v_weight");
-  p.over_a_weight = node.declare_parameter<double>("over_a_weight");
+  declareSmootherParam(smoother_param_, node);
+
+  qp_solver_.updateMaxIter(4000);
+  qp_solver_.updateRhoInterval(0);  // 0 means automatic
+  qp_solver_.updateEpsRel(1.0e-4);  // def: 1.0e-4
+  qp_solver_.updateEpsAbs(1.0e-4);  // def: 1.0e-4
+  qp_solver_.updateVerbose(false);
+}
+
+L2PseudoJerkSmoother::L2PseudoJerkSmoother(
+  autoware::agnocast_wrapper::Node & node,
+  const std::shared_ptr<autoware_utils_debug::TimeKeeper> time_keeper)
+: SmootherBase(node, time_keeper)
+{
+  declareSmootherParam(smoother_param_, node);
 
   qp_solver_.updateMaxIter(4000);
   qp_solver_.updateRhoInterval(0);  // 0 means automatic
@@ -138,7 +161,7 @@ bool L2PseudoJerkSmoother::apply(
   b is almost 0, and is not a big problem.
   */
   for (unsigned int i = 0; i < N; ++i) {
-    const int j = 2 * N + i;
+    const int j = static_cast<int>(2 * N + i);
     A(i, i) = 1.0;   // b_i
     A(i, j) = -1.0;  // -delta_i
     upper_bound[i] = v_max[i] * v_max[i];
@@ -147,7 +170,7 @@ bool L2PseudoJerkSmoother::apply(
 
   // a_min < a - sigma < a_max
   for (unsigned int i = N; i < 2 * N; ++i) {
-    const int j = 2 * N + i;
+    const int j = static_cast<int>(2 * N + i);
     A(i, i) = 1.0;   // a_i
     A(i, j) = -1.0;  // -sigma_i
     if (i != N && v_max[i - N] < std::numeric_limits<double>::epsilon()) {
@@ -185,7 +208,8 @@ bool L2PseudoJerkSmoother::apply(
 
   const auto tf1 = std::chrono::system_clock::now();
   const double dt_ms1 =
-    std::chrono::duration_cast<std::chrono::nanoseconds>(tf1 - ts).count() * 1.0e-6;
+    static_cast<double>(std::chrono::duration_cast<std::chrono::nanoseconds>(tf1 - ts).count()) *
+    1.0e-6;
 
   // execute optimization
   const auto ts2 = std::chrono::system_clock::now();
@@ -210,8 +234,8 @@ bool L2PseudoJerkSmoother::apply(
     double v = optval.at(i);
     // std::cout << "[smoother] v[" << i << "] : " << std::sqrt(std::max(v, 0.0)) <<
     // ", v_max[" << i << "] : " << v_max[i] << std::endl;
-    output.at(i).longitudinal_velocity_mps = std::sqrt(std::max(v, 0.0));
-    output.at(i).acceleration_mps2 = optval.at(i + N);
+    output.at(i).longitudinal_velocity_mps = static_cast<float>(std::sqrt(std::max(v, 0.0)));
+    output.at(i).acceleration_mps2 = static_cast<float>(optval.at(i + N));
   }
   for (unsigned int i = N; i < output.size(); ++i) {
     output.at(i).longitudinal_velocity_mps = 0.0;
@@ -231,7 +255,8 @@ bool L2PseudoJerkSmoother::apply(
 
   const auto tf2 = std::chrono::system_clock::now();
   const double dt_ms2 =
-    std::chrono::duration_cast<std::chrono::nanoseconds>(tf2 - ts2).count() * 1.0e-6;
+    static_cast<double>(std::chrono::duration_cast<std::chrono::nanoseconds>(tf2 - ts2).count()) *
+    1.0e-6;
   RCLCPP_DEBUG(logger_, "init time = %f [ms], optimization time = %f [ms]", dt_ms1, dt_ms2);
 
   return true;

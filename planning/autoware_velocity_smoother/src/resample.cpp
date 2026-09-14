@@ -19,6 +19,7 @@
 #include "autoware/motion_utils/trajectory/trajectory.hpp"
 #include "autoware/velocity_smoother/trajectory_utils.hpp"
 
+#include <autoware/agnocast_wrapper/runtime.hpp>
 #include <autoware_utils_geometry/geometry.hpp>
 
 #include <algorithm>
@@ -73,7 +74,7 @@ TrajectoryPoints resampleTrajectory(
   bool is_endpoint_included = false;
   for (size_t i = 1; static_cast<double>(i) <= N; ++i) {
     double ds = ds_nominal;
-    if (i > Nt) {
+    if (static_cast<double>(i) > Nt) {
       // if the planning time is not enough to see the desired distance,
       // change the interval distance to see far.
       ds = std::max(param.sparse_min_interval_distance, param.sparse_resample_dt * v_current);
@@ -93,7 +94,7 @@ TrajectoryPoints resampleTrajectory(
     }
 
     // Check if the distance is longer than minimum_trajectory_length
-    if (i > Nt && dist_i >= param.min_trajectory_length) {
+    if (static_cast<double>(i) > Nt && dist_i >= param.min_trajectory_length) {
       if (
         std::fabs(out_arclength.back() - (param.min_trajectory_length + front_arclength_value)) <
         1e-3) {
@@ -199,7 +200,7 @@ TrajectoryPoints resampleTrajectory(
   double dist_i{0.0};
   bool is_zero_point_included{false};
   bool is_endpoint_included{false};
-  while (rclcpp::ok()) {
+  while (autoware::agnocast_wrapper::ok()) {
     double ds = nominal_ds;
     if (start_stop_arclength_value <= dist_i && dist_i <= stop_arclength_value) {
       // Dense sampling before the stop point
