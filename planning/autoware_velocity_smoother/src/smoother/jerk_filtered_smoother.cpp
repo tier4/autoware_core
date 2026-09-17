@@ -18,6 +18,7 @@
 #include "autoware/velocity_smoother/trajectory_utils.hpp"
 
 #include <Eigen/Core>
+#include <autoware/agnocast_wrapper/node.hpp>
 
 #include <algorithm>
 #include <chrono>
@@ -32,16 +33,35 @@
 
 namespace autoware::velocity_smoother
 {
+namespace
+{
+template <typename NodeT>
+void declareSmootherParam(JerkFilteredSmoother::Param & p, NodeT & node)
+{
+  p.jerk_weight = node.template declare_parameter<double>("jerk_weight");
+  p.over_v_weight = node.template declare_parameter<double>("over_v_weight");
+  p.over_a_weight = node.template declare_parameter<double>("over_a_weight");
+  p.over_j_weight = node.template declare_parameter<double>("over_j_weight");
+  p.jerk_filter_ds = node.template declare_parameter<double>("jerk_filter_ds");
+}
+}  // namespace
+
 JerkFilteredSmoother::JerkFilteredSmoother(
   rclcpp::Node & node, const std::shared_ptr<autoware_utils_debug::TimeKeeper> time_keeper)
 : SmootherBase(node, time_keeper)
 {
-  auto & p = smoother_param_;
-  p.jerk_weight = node.declare_parameter<double>("jerk_weight");
-  p.over_v_weight = node.declare_parameter<double>("over_v_weight");
-  p.over_a_weight = node.declare_parameter<double>("over_a_weight");
-  p.over_j_weight = node.declare_parameter<double>("over_j_weight");
-  p.jerk_filter_ds = node.declare_parameter<double>("jerk_filter_ds");
+  declareSmootherParam(smoother_param_, node);
+
+  qp_interface_ =
+    std::make_shared<autoware::qp_interface::ProxQPInterface>(false, 20000, 1.0e-8, 1.0e-6, false);
+}
+
+JerkFilteredSmoother::JerkFilteredSmoother(
+  autoware::agnocast_wrapper::Node & node,
+  const std::shared_ptr<autoware_utils_debug::TimeKeeper> time_keeper)
+: SmootherBase(node, time_keeper)
+{
+  declareSmootherParam(smoother_param_, node);
 
   qp_interface_ =
     std::make_shared<autoware::qp_interface::ProxQPInterface>(false, 20000, 1.0e-8, 1.0e-6, false);
@@ -72,8 +92,8 @@ bool JerkFilteredSmoother::apply(
 
   if (input.size() == 1) {
     // No need to do optimization
-    output.front().longitudinal_velocity_mps = v0;
-    output.front().acceleration_mps2 = a0;
+    output.front().longitudinal_velocity_mps = static_cast<float>(v0);
+    output.front().acceleration_mps2 = static_cast<float>(a0);
     debug_trajectories.resize(3);
     debug_trajectories[0] = output;
     debug_trajectories[1] = output;
@@ -129,8 +149,8 @@ bool JerkFilteredSmoother::apply(
   // If Resampled Size is too small, we don't do optimization
   if (opt_resampled_trajectory.size() == 1) {
     // No need to do optimization
-    output.front().longitudinal_velocity_mps = v0;
-    output.front().acceleration_mps2 = a0;
+    output.front().longitudinal_velocity_mps = static_cast<float>(v0);
+    output.front().acceleration_mps2 = static_cast<float>(a0);
     if (publish_debug_trajs) {
       debug_trajectories.resize(3);
       debug_trajectories[0] = output;
@@ -208,10 +228,14 @@ bool JerkFilteredSmoother::apply(
     const double ref_vel = 0.5 * (v_max_arr.at(i) + v_max_arr.at(i + 1));
     const double interval_dist = std::max(interval_dist_arr.at(i), 0.0001);
     const double w_x_ds_inv = (1.0 / interval_dist) * ref_vel;
-    P(IDX_A0 + i, IDX_A0 + i) += smooth_weight * w_x_ds_inv * w_x_ds_inv * interval_dist;
-    P(IDX_A0 + i, IDX_A0 + i + 1) -= smooth_weight * w_x_ds_inv * w_x_ds_inv * interval_dist;
-    P(IDX_A0 + i + 1, IDX_A0 + i) -= smooth_weight * w_x_ds_inv * w_x_ds_inv * interval_dist;
-    P(IDX_A0 + i + 1, IDX_A0 + i + 1) += smooth_weight * w_x_ds_inv * w_x_ds_inv * interval_dist;
+    P(static_cast<Eigen::Index>(IDX_A0 + i), static_cast<Eigen::Index>(IDX_A0 + i)) +=
+      smooth_weight * w_x_ds_inv * w_x_ds_inv * interval_dist;
+    P(static_cast<Eigen::Index>(IDX_A0 + i), static_cast<Eigen::Index>(IDX_A0 + i + 1)) -=
+      smooth_weight * w_x_ds_inv * w_x_ds_inv * interval_dist;
+    P(static_cast<Eigen::Index>(IDX_A0 + i + 1), static_cast<Eigen::Index>(IDX_A0 + i)) -=
+      smooth_weight * w_x_ds_inv * w_x_ds_inv * interval_dist;
+    P(static_cast<Eigen::Index>(IDX_A0 + i + 1), static_cast<Eigen::Index>(IDX_A0 + i + 1)) +=
+      smooth_weight * w_x_ds_inv * w_x_ds_inv * interval_dist;
   }
 
   // |v_max_i^2 - b_i|/v_max^2 -> minimize (-bi) * ds / v_max^2
@@ -224,9 +248,12 @@ bool JerkFilteredSmoother::apply(
       }
       q.at(IDX_B0 + i) += v_weight_term;
     }
-    P(IDX_DELTA0 + i, IDX_DELTA0 + i) += over_v_weight;  // over velocity cost
-    P(IDX_SIGMA0 + i, IDX_SIGMA0 + i) += over_a_weight;  // over acceleration cost
-    P(IDX_GAMMA0 + i, IDX_GAMMA0 + i) += over_j_weight;  // over jerk cost
+    P(static_cast<Eigen::Index>(IDX_DELTA0 + i), static_cast<Eigen::Index>(IDX_DELTA0 + i)) +=
+      over_v_weight;  // over velocity cost
+    P(static_cast<Eigen::Index>(IDX_SIGMA0 + i), static_cast<Eigen::Index>(IDX_SIGMA0 + i)) +=
+      over_a_weight;  // over acceleration cost
+    P(static_cast<Eigen::Index>(IDX_GAMMA0 + i), static_cast<Eigen::Index>(IDX_GAMMA0 + i)) +=
+      over_j_weight;  // over jerk cost
   }
 
   /**************************************************************/
@@ -247,16 +274,18 @@ bool JerkFilteredSmoother::apply(
 
   // Soft Constraint Velocity Limit: 0 < b - delta < v_max^2
   for (size_t i = 0; i < N; ++i, ++constr_idx) {
-    A(constr_idx, IDX_B0 + i) = 1.0;       // b_i
-    A(constr_idx, IDX_DELTA0 + i) = -1.0;  // -delta_i
+    A(static_cast<Eigen::Index>(constr_idx), static_cast<Eigen::Index>(IDX_B0 + i)) = 1.0;  // b_i
+    A(static_cast<Eigen::Index>(constr_idx), static_cast<Eigen::Index>(IDX_DELTA0 + i)) =
+      -1.0;  // -delta_i
     upper_bound[constr_idx] = v_max_arr.at(i) * v_max_arr.at(i);
     lower_bound[constr_idx] = 0.0;
   }
 
   // Soft Constraint Acceleration Limit: a_min < a - sigma < a_max
   for (size_t i = 0; i < N; ++i, ++constr_idx) {
-    A(constr_idx, IDX_A0 + i) = 1.0;       // a_i
-    A(constr_idx, IDX_SIGMA0 + i) = -1.0;  // -sigma_i
+    A(static_cast<Eigen::Index>(constr_idx), static_cast<Eigen::Index>(IDX_A0 + i)) = 1.0;  // a_i
+    A(static_cast<Eigen::Index>(constr_idx), static_cast<Eigen::Index>(IDX_SIGMA0 + i)) =
+      -1.0;  // -sigma_i
 
     constexpr double stop_vel = 1e-3;
     if (v_max_arr.at(i) < stop_vel) {
@@ -274,30 +303,35 @@ bool JerkFilteredSmoother::apply(
   for (size_t i = 0; i < N - 1; ++i, ++constr_idx) {
     const double ref_vel = 0.5 * (v_max_arr.at(i) + v_max_arr.at(i + 1));
     const double ds = interval_dist_arr.at(i);
-    A(constr_idx, IDX_A0 + i) = -ref_vel;     // -a[i] * ref_vel
-    A(constr_idx, IDX_A0 + i + 1) = ref_vel;  //  a[i+1] * ref_vel
-    A(constr_idx, IDX_GAMMA0 + i) = -ds;      // -gamma[i] * ds
-    upper_bound[constr_idx] = j_max * ds;     //  jerk_max * ds
-    lower_bound[constr_idx] = j_min * ds;     //  jerk_min * ds
+    A(static_cast<Eigen::Index>(constr_idx), static_cast<Eigen::Index>(IDX_A0 + i)) =
+      -ref_vel;  // -a[i] * ref_vel
+    A(static_cast<Eigen::Index>(constr_idx), static_cast<Eigen::Index>(IDX_A0 + i + 1)) =
+      ref_vel;  //  a[i+1] * ref_vel
+    A(static_cast<Eigen::Index>(constr_idx), static_cast<Eigen::Index>(IDX_GAMMA0 + i)) =
+      -ds;                                 // -gamma[i] * ds
+    upper_bound[constr_idx] = j_max * ds;  //  jerk_max * ds
+    lower_bound[constr_idx] = j_min * ds;  //  jerk_min * ds
   }
 
   // b' = 2a ... (b(i+1) - b(i)) / ds = 2a(i)
   for (size_t i = 0; i < N - 1; ++i, ++constr_idx) {
-    A(constr_idx, IDX_B0 + i) = -1.0;                            // b(i)
-    A(constr_idx, IDX_B0 + i + 1) = 1.0;                         // b(i+1)
-    A(constr_idx, IDX_A0 + i) = -2.0 * interval_dist_arr.at(i);  // a(i) * ds
+    A(static_cast<Eigen::Index>(constr_idx), static_cast<Eigen::Index>(IDX_B0 + i)) = -1.0;  // b(i)
+    A(static_cast<Eigen::Index>(constr_idx), static_cast<Eigen::Index>(IDX_B0 + i + 1)) =
+      1.0;  // b(i+1)
+    A(static_cast<Eigen::Index>(constr_idx), static_cast<Eigen::Index>(IDX_A0 + i)) =
+      -2.0 * interval_dist_arr.at(i);  // a(i) * ds
     upper_bound[constr_idx] = 0.0;
     lower_bound[constr_idx] = 0.0;
   }
 
   // initial condition
   {
-    A(constr_idx, IDX_B0) = 1.0;  // b0
+    A(static_cast<Eigen::Index>(constr_idx), static_cast<Eigen::Index>(IDX_B0)) = 1.0;  // b0
     upper_bound[constr_idx] = v0 * v0;
     lower_bound[constr_idx] = v0 * v0;
     ++constr_idx;
 
-    A(constr_idx, IDX_A0) = 1.0;  // a0
+    A(static_cast<Eigen::Index>(constr_idx), static_cast<Eigen::Index>(IDX_A0)) = 1.0;  // a0
     upper_bound[constr_idx] = a0;
     lower_bound[constr_idx] = a0;
   }
@@ -321,18 +355,19 @@ bool JerkFilteredSmoother::apply(
 
   const auto tf1 = std::chrono::system_clock::now();
   const double dt_ms1 =
-    std::chrono::duration_cast<std::chrono::nanoseconds>(tf1 - ts).count() * 1.0e-6;
+    static_cast<double>(std::chrono::duration_cast<std::chrono::nanoseconds>(tf1 - ts).count()) *
+    1.0e-6;
   RCLCPP_DEBUG(logger_, "optimization time = %f [ms]", dt_ms1);
 
   // get velocity & acceleration
   for (size_t i = 0; i < N; ++i) {
     double b = optval.at(IDX_B0 + i);
-    output.at(i).longitudinal_velocity_mps = std::sqrt(std::max(b, 0.0));
-    output.at(i).acceleration_mps2 = optval.at(IDX_A0 + i);
+    output.at(i).longitudinal_velocity_mps = static_cast<float>(std::sqrt(std::max(b, 0.0)));
+    output.at(i).acceleration_mps2 = static_cast<float>(optval.at(IDX_A0 + i));
   }
   for (size_t i = N; i < output.size(); ++i) {
     output.at(i).longitudinal_velocity_mps = 0.0;
-    output.at(i).acceleration_mps2 = a_stop_decel;
+    output.at(i).acceleration_mps2 = static_cast<float>(a_stop_decel);
   }
 
   if (VERBOSE_TRAJECTORY_VELOCITY) {
@@ -387,8 +422,8 @@ TrajectoryPoints JerkFilteredSmoother::forwardJerkFilter(
   double current_acc = a0;
   applyLimits(current_vel, current_acc, 0);
 
-  output.front().longitudinal_velocity_mps = current_vel;
-  output.front().acceleration_mps2 = current_acc;
+  output.front().longitudinal_velocity_mps = static_cast<float>(current_vel);
+  output.front().acceleration_mps2 = static_cast<float>(current_acc);
   for (size_t i = 1; i < input.size(); ++i) {
     const double ds = autoware_utils_geometry::calc_distance2d(input.at(i), input.at(i - 1));
     const double max_dt = std::pow(6.0 * ds / j_max, 1.0 / 3.0);  // assuming v0 = a0 = 0.
@@ -403,8 +438,8 @@ TrajectoryPoints JerkFilteredSmoother::forwardJerkFilter(
       current_acc = current_acc + j_max * dt;
     }
     applyLimits(current_vel, current_acc, i);
-    output.at(i).longitudinal_velocity_mps = current_vel;
-    output.at(i).acceleration_mps2 = current_acc;
+    output.at(i).longitudinal_velocity_mps = static_cast<float>(current_vel);
+    output.at(i).acceleration_mps2 = static_cast<float>(current_acc);
   }
   return output;
 }
@@ -444,9 +479,9 @@ TrajectoryPoints JerkFilteredSmoother::mergeFilteredTrajectory(
   if (getVx(backward_filtered, 0) < v0) {
     double current_vel = v0;
     double current_acc = a0;
-    while (getVx(backward_filtered, i) < current_vel && i < merged.size() - 1) {
-      merged.at(i).longitudinal_velocity_mps = current_vel;
-      merged.at(i).acceleration_mps2 = current_acc;
+    while (getVx(backward_filtered, static_cast<int>(i)) < current_vel && i < merged.size() - 1) {
+      merged.at(i).longitudinal_velocity_mps = static_cast<float>(current_vel);
+      merged.at(i).acceleration_mps2 = static_cast<float>(current_acc);
 
       const double ds = autoware_utils_geometry::calc_distance2d(
         forward_filtered.at(i + 1), forward_filtered.at(i));
@@ -463,8 +498,8 @@ TrajectoryPoints JerkFilteredSmoother::mergeFilteredTrajectory(
         current_acc = current_acc + j_min * dt;
       }
 
-      if (current_vel > getVx(forward_filtered, i)) {
-        current_vel = getVx(forward_filtered, i);
+      if (current_vel > getVx(forward_filtered, static_cast<int>(i))) {
+        current_vel = getVx(forward_filtered, static_cast<int>(i));
       }
       ++i;
     }
@@ -472,9 +507,10 @@ TrajectoryPoints JerkFilteredSmoother::mergeFilteredTrajectory(
 
   // take smaller velocity point
   for (; i < merged.size(); ++i) {
-    merged.at(i) = (getVx(forward_filtered, i) < getVx(backward_filtered, i))
-                     ? forward_filtered.at(i)
-                     : backward_filtered.at(i);
+    merged.at(i) =
+      (getVx(forward_filtered, static_cast<int>(i)) < getVx(backward_filtered, static_cast<int>(i)))
+        ? forward_filtered.at(i)
+        : backward_filtered.at(i);
   }
   return merged;
 }
