@@ -172,7 +172,7 @@ void Lanelet2MapVisualizationNode::on_map_bin(
   set_color(&cl_shoulder, 0.15, 0.15, 0.15, 0.999);
   set_color(&cl_cross, 0.27, 0.3, 0.27, 0.5);
   set_color(&cl_partitions, 0.25, 0.25, 0.25, 0.999);
-  set_color(&cl_road_borders, 0.3, 0.25, 0.3, 0.999);
+  set_color(&cl_road_borders, 0.8, 0.0, 0.2, 0.8);
   set_color(&cl_pedestrian_markings, 0.5, 0.5, 0.5, 0.999);
   set_color(&cl_ll_borders, 0.5, 0.5, 0.5, 0.999);
   set_color(&cl_shoulder_borders, 0.2, 0.2, 0.2, 0.999);
