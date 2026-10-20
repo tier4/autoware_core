@@ -94,7 +94,8 @@ private:
     sub_current_acceleration_{this, "~/input/acceleration"};
   autoware_utils_rclcpp::InterProcessPollingSubscriber<
     VelocityLimit, autoware_utils_rclcpp::polling_policy::Newest>
-    sub_external_velocity_limit_{this, "~/input/external_velocity_limit_mps"};
+    sub_external_velocity_limit_{
+      this, "~/input/external_velocity_limit_mps", rclcpp::QoS{1}.transient_local()};
   autoware_utils_rclcpp::InterProcessPollingSubscriber<OperationModeState> sub_operation_mode_{
     this, "~/input/operation_mode_state", rclcpp::QoS{1}.transient_local()};
 
