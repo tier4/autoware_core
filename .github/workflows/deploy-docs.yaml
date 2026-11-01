@@ -57,7 +57,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ github.event.pull_request.head.sha }} # zizmor: ignore[untrusted-checkout]
           # This job builds fork code with the secrets of the base repository.
           # It runs only after a maintainer adds the run:deploy-docs label.
           # Before you add the label, review the full diff.
