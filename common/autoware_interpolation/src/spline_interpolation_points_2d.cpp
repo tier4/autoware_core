@@ -14,6 +14,8 @@
 
 #include "autoware/interpolation/spline_interpolation_points_2d.hpp"
 
+#include <autoware_utils_geometry/geometry.hpp>
+
 #include <vector>
 
 namespace autoware::interpolation
@@ -75,9 +77,20 @@ std::vector<double> splineYawFromPoints(const std::vector<T> & points)
 
   // interpolate base_keys at query_keys
   std::vector<double> yaw_vec;
+  yaw_vec.reserve(points.size());
+
+  size_t base_idx = 0;
   for (size_t i = 0; i < points.size(); ++i) {
-    const double yaw = interpolator.getSplineInterpolatedYaw(i, 0.0);
-    yaw_vec.push_back(yaw);
+    if (i > 0) {
+      const auto & curr = autoware_utils_geometry::get_point(points.at(i));
+      const auto & prev = autoware_utils_geometry::get_point(points.at(i - 1));
+      if (std::fabs(curr.x - prev.x) < 1e-6 && std::fabs(curr.y - prev.y) < 1e-6) {
+        yaw_vec.push_back(yaw_vec.back());
+        continue;
+      }
+      ++base_idx;
+    }
+    yaw_vec.push_back(interpolator.getSplineInterpolatedYaw(base_idx, 0.0));
   }
   return yaw_vec;
 }

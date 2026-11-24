@@ -94,6 +94,19 @@ TEST(spline_interpolation, splineYawFromPoints)
       EXPECT_NEAR(yaws.at(i), ans.at(i), epsilon);
     }
   }
+
+  {  // duplicate consecutive points (must not throw)
+    std::vector<geometry_msgs::msg::Point> points;
+    points.push_back(create_point(0.0, 0.0, 0.0));
+    points.push_back(create_point(1.0, 1.5, 0.0));
+    points.push_back(create_point(1.0, 1.5, 0.0));  // duplicate
+    points.push_back(create_point(2.0, 3.0, 0.0));
+
+    EXPECT_NO_THROW(autoware::interpolation::splineYawFromPoints(points));
+    const auto yaws = autoware::interpolation::splineYawFromPoints(points);
+    EXPECT_EQ(yaws.size(), points.size());
+    EXPECT_NEAR(yaws.at(1), yaws.at(2), epsilon);
+  }
 }
 
 TEST(spline_interpolation, SplineInterpolationPoints2d)
